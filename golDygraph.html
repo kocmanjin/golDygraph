@@ -1,0 +1,477 @@
+
+
+<html>
+<body>
+
+<script src="http://code.jquery.com/jquery-1.10.2.js"></script>
+<script src="http://code.jquery.com/ui/1.11.0/jquery-ui.js"></script>
+<script type="application/javascript" src="scripts/dygraph-combined.js"></script>
+
+<style>
+
+    body {
+        margin: 1em;
+    }
+
+    /*thanks to http://cssdeck.com/labs/close-icon-from-twitter-bootstrap*/
+    .close {
+        font-family: "Helvetica Neue", Helvetica, Arial, sans-serif;
+        font-size: 20px;
+        font-weight: bold;
+        line-height: 16px;
+        color: #000000;
+        text-shadow: 0 1px 0 #ffffff;
+        opacity: 0.3;
+        filter: alpha(opacity=20);
+        text-decoration: none;
+        padding-left: 4px;
+    }
+    .close:hover {
+        color: #d60000;
+        text-decoration: none;
+        opacity: 0.6;
+        filter: alpha(opacity=60);
+        cursor: pointer;
+    }
+
+    #gnuplot_caption {
+        color: rgb(66, 94, 124);
+        font-family: Lucida Console, Monaco;
+    }
+
+    #gnuplot_text {
+        background: #f9f9f9;
+        border-left: 10px solid #ccc;
+        padding: 0.5em 10px;
+        color: #333333;
+        font-family: Lucida Console, Monaco, monospace;
+        font-size: 15px;
+    }
+
+    .notif_container {
+        position: fixed;
+        right: 5px;
+        top: 5px;
+    }
+    .notif_element {
+        color:#555;
+        border-radius:2px;
+        font-family:Tahoma,Geneva,Arial,sans-serif;font-size:11px;
+        padding:5px 5px 5px 27px;
+        margin:5px;
+    }
+    .notif_container .error {
+        background:#ffecec url('images/error.png') no-repeat 5px 50%;
+        border:1px solid #f5aca6;
+    }
+    .notif_container .loading {
+        background:#fff8c4 url('images/loader.gif') no-repeat 5px 50%;
+        border:1px solid #f2c779;
+
+    }
+    .notif_container .type {
+        font-weight:bold;
+        text-transform:uppercase;
+    }
+
+</style>
+
+
+
+<script>
+    "use strict";
+
+    //var diagnostics = {
+    //    1 : '1',
+    //    2 : '2',
+    //    3 : '3',
+    //    4 : '4',
+    //    5 : '5',
+    //    6 : '6',
+    //    7 : '7',
+    //    8 : '8',
+    //    9 : '9'
+    //}
+
+    var diagnostics = {
+        loop_voltage     : 'Uloop',
+        toroidal_field   : 'Btoroidal',
+        plasma_current   : 'Iplasma',
+        rogowski_current : 'Irogowski',
+        photodiode       : 'Photodiode',
+        photodiode_alpha : 'PhotodHalfa',
+        hxr              : 'HXR',
+        electron_density : 'el. density'
+    }
+
+    var graph;
+    var currShotNo = 0;
+    var editor;
+
+    function formatErrorMessage(jqXHR, exception) {
+
+
+        if (jqXHR.status === 0) {
+            if (exception == 'timeout') return ('Connection timed out')
+            else return ('Not connected.\nCheck network connection and domain (golem.fjfi...).');
+        } else if (jqXHR.status == 404) {
+            return ('The requested page not found. [404]');
+        } else if (jqXHR.status == 500) {
+            return ('Internal Server Error [500].');
+        } else if (exception === 'parsererror') {
+            return ('Requested JSON parse failed.');
+        } else if (exception === 'timeout') {
+            return ('Time out error.');
+        } else if (exception === 'abort') {
+            return ('Ajax request aborted.');
+        } else {
+            return ('Uncaught Error.\n' + jqXHR.responseText);
+        }
+    }
+
+    function createLoadNotif(text) {
+        return $('<div class="notif_element loading"><span class="type">info:</span>' + text + '</div>').appendTo($('#notification'));
+    }
+    function createErrorNotif(text) {
+        var elem = $('<div class="notif_element error"><span class="type">error:</span>' + text + '</div>').appendTo($('#notification'));
+        elem.click(function() {
+            $(this).remove();
+        });
+        return elem;
+    }
+    function changeLoadToError(jqElem, text) {
+        jqElem.html('<span class="type">error:</span>' + text + '</div>');
+        jqElem.switchClass('loading', 'error');
+        jqElem.click(function() {
+            $(this).remove();
+        });
+    }
+
+
+    function getData(jqElem) {
+        var shotno = jqElem.data('shotno');
+        var diagn = jqElem.data('diagn');
+        var url = 'http://golem.fjfi.cvut.cz/utils/data/' + shotno + '/' + diagn; // ostry provoz
+//    var url = 'http://localhost:8080/golem?shotNo=' + shotno + '&diagn=' + diagn; // testing
+        var notif = createLoadNotif('Obtaining data  from <i>' + url + '</i>');
+        jqElem.data('notif', notif);
+        jqElem.data('done', false);
+        jqElem.data('error', false);
+        $.ajax({
+            async: true,
+            type: 'GET',
+            url: url,
+            timeout: 9000,
+            success:  function(data, status, jqHXR) {
+                /*if (!/^(\d+(\.\d+)?\t\d+(\.\d+)?\n)/.test(data)) {
+                 jqElem.data('error', true);
+                 changeLoadToError(jqElem.data('notif'), 'Data obtained from <i>' + url + '</i><br/> is not in expected format!')
+                 return;
+                 } */
+                jqElem.data('data', data);
+                jqElem.data('notif').fadeOut(500);
+                setTimeout(function() {
+                    jqElem.data('notif').remove();
+                }, 500);
+            },
+            error:    function(data, status, errorThrown) {
+                jqElem.data('error', true);
+                changeLoadToError(jqElem.data('notif'), 'Request failed <i>' + url + '</i><br/>' + formatErrorMessage(data, errorThrown));
+            },
+            complete: function(data, status) {
+                jqElem.data('done', true);
+                jqElem.data('funcComplete')(jqElem);
+            }
+        });
+
+    }
+
+    var completeData = function completeData(jqElem) {
+        var dataSet = jqElem.data('dataset');
+        for (var i = 0; i < dataSet.length; i++) {
+            if (!dataSet[i].data('done')) {
+                return;
+            }
+        }
+
+        var data = [];
+        var labels = [];
+        for (var i = 0; i < dataSet.length; i++) {
+            if (dataSet[i].data('error')) continue;
+            var shotno = dataSet[i].data('shotno');
+            var diagn = dataSet[i].data('diagn');
+            var label = '#' + shotno + '-' + diagn;
+            dataSet[i].data('label', label);
+            labels.push(label);
+            data.push(parseToArray(dataSet[i].data('data')));
+        }
+        if (data.length == 0) {
+            $('#showButton').removeAttr('disabled');
+            return;
+        }
+        var array = joinArrays(data);
+        graph.updateOptions({
+            file: array,
+            labels: ['time'].concat(labels)
+        });
+
+        for(var i = 0; i < dataSet.length; i++) {
+            var properties = graph.getPropertiesForSeries(dataSet[i].data('label'));
+            if (properties) {
+                dataSet[i].children('span').css('color', properties.color);
+            } else {
+                dataSet[i].children('span').css('color', '#ffffff');
+            }
+        }
+        $('#showButton').removeAttr('disabled');
+    }
+
+    function getCurrent() {
+//        currShotNo = parseInt(getData(0, 'shotno'));
+        var shotno = 0;
+        var diagn = 'shotno';
+        var url = 'http://golem.fjfi.cvut.cz/utils/data/' + shotno + '/' + diagn; // ostry provoz
+        //var url = 'http://localhost:8080/golem?shotNo=' + shotno + '&diagn=' + diagn; // testing
+        $.ajax({
+            async: false,
+            type: 'GET',
+            url: url,
+            timeout: 5000,
+            success:  function(data, status, jqHXR) {
+                if (!/^(\d+(\.\d+)?)$/.test(data.trim())) {
+                    createErrorNotif('Cannot obtain current shot number!');
+                }
+                currShotNo = parseInt(data);
+            },
+            error:    function(data, status, errorThrown) {
+                createErrorNotif('Request failed <i>' + url + '</i><br/>' + formatErrorMessage(data, errorThrown));
+            },
+            complete: function(data, status) {
+            }
+        });
+
+    }
+
+    $(document).ready( function() {
+        $('#roll_average_value').hide();
+        getCurrent();
+        addInputRow(false);
+
+        graph = new Dygraph(document.getElementById("graph"), "0 0\n0.04 0", {
+//        labels: ['time', '#' + currShotNo + '-' + diagn],
+            xlabel: 'time [s]',
+            ylabel: 'unit [a.u.]',
+            labelsDiv: 'label',
+            drawCallback: function() {
+                $('#gnuplot_text').text(toGnuplotCommand2());
+            }
+        });
+
+        $('#add_row').click(function(e) {
+            e.preventDefault();
+            addInputRow(true);
+        });
+
+        $('#showButton').click( function(e) {
+            e.preventDefault();
+            $(this).attr("disabled", true);
+            var rows = $('#rows').children();
+            var dataSet = [];
+            for (var i = 0; i < rows.length; i++) {
+                var row = $(rows[i]);
+                dataSet.push(row);
+                var shotno = $('input[name=shotNo]', row).val();
+                var diagn = $('select[name=diagn]', row).val();
+                row.data('shotno', shotno);
+                row.data('diagn', diagn);
+                row.data('funcComplete', completeData);
+                row.data('dataset', dataSet);
+            }
+            for (i = 0; i < dataSet.length; i++) {
+                getData(dataSet[i]);
+            }
+        });
+
+        $('#set_current').click( function(e) {
+            e.preventDefault();
+            getCurrent();
+            var rows = $('#rows').children();
+            for (var i = 0; i < rows.length; i++) {
+                $('input[name=shotNo]', rows[i]).val(currShotNo - i);
+            }
+        });
+
+        $('#roll_average').change(function() {
+            var rollPer = 1;
+            if ($('#roll_average').prop('checked')) {
+                $('#roll_average_value').fadeIn('fast');
+                rollPer = $('#roll_average_value').val();
+            } else {
+                $('#roll_average_value').fadeOut('fast');
+            }
+            graph.updateOptions({
+                rollPeriod: rollPer
+            });
+        });
+        $('#roll_average_value').change(function() {
+            graph.updateOptions({
+                rollPeriod: $(this).val()
+            });
+        });
+
+    });
+
+    function toGnuplotCommand() {
+        if (!graph) return;
+        var xrange = graph.xAxisRange();
+        var yrange = graph.yAxisRange();
+        var text =  "echo \"set ytics nomirror;set xrange[" + xrange[0].toFixed(4) + ":" + xrange[1].toFixed(4) +
+                "];set yrange[" + yrange[0].toFixed(4) + ":" + yrange[1].toFixed(4) +
+                "];plot ";
+
+        var rows = $('#rows').children();
+        for (var i = 0; i < rows.length; i++) {
+            var shotNo = $('input[name=shotNo]', rows[i]).val();
+            var diagn = $('select[name=diagn]', rows[i]).val();
+            text += '\'< wget -q -O - http://golem.fjfi.cvut.cz/utils/data/' + shotNo + '/' + diagn + '\'' +
+                    ' u 1:2 w l title \'' + shotNo + "-" + diagn + '\',' ;
+        }
+        text = text.substring(0, text.length - 1);
+        text += '" | gnuplot -persist';
+        return text;
+    }
+    function toGnuplotCommand2() {
+        if (!graph) return;
+        var text =  "echo \"set ytics nomirror;plot ";
+
+        var rows = $('#rows').children();
+        for (var i = 0; i < rows.length; i++) {
+            var shotNo = $('input[name=shotNo]', rows[i]).val();
+            var diagn = $('select[name=diagn]', rows[i]).val();
+            text += '\'< wget -q -O - http://golem.fjfi.cvut.cz/utils/data/' + shotNo + '/' + diagn + '\'' +
+                    ' u 1:2 w l title \'' + shotNo + "-" + diagn + '\',' ;
+        }
+        text = text.substring(0, text.length - 1);
+        text += '" | gnuplot -persist';
+        return text;
+    }
+
+
+    function parseToArray(array) {
+        var ret = []
+        var ar = array.split("\n");
+        for (var i = 0; i < ar.length; i++) {
+            var separator = "";
+            if (ar[i].indexOf("\t") != -1) {
+                separator = "\t";
+            } else if (ar[i].indexOf(" ") != -1) {
+                separator = " ";
+            } else {
+                continue;
+            }
+
+            var line = ar[i].split(separator);
+            ret[i] = [];
+            for (var j = 0; j < line.length; j++) {
+                ret[i][j] = parseFloat(line[j]);
+            }
+        }
+        return ret;
+    }
+
+    function joinArrays(arrays) {
+        var ret = [];
+        for (var i = 0; i < arrays[0].length; i++) {
+            ret[i] = [];
+            ret[i][0] = arrays[0][i][0];
+            for (var j = 0; j < arrays.length; j++) {
+                ret[i][j+1] = arrays[j][i][1];
+            }
+        }
+        return ret;
+    }
+
+    // funkce prida do elementu 'row' dalsi radek
+    function addInputRow(closeButton) {
+        var rows = $('#rows');
+        var row  = $('<div></div>').appendTo(rows);
+
+        $('<span>&#9632</span>').css('color', '#ffffff').css('font-size', '125%').appendTo(row);
+        var minsBut = $('<input type=\'button\' value=\'-\'/>').appendTo(row);
+        var numBut  = $('<input type=\'text\' name=\'shotNo\' value=\'' + currShotNo + '\' class=\'shotNo\'/>').appendTo(row);
+        var plusBut = $('<input type=\'button\' value=\'+\'/>').appendTo(row);
+        var select  = $('<select type=\'select\' name=\'diagn\'></select>').appendTo(row);
+        for (var key in diagnostics) {
+            $('<option value=\'' + key + '\'>' + diagnostics[key] + '</option>').appendTo(select);
+        }
+        if (closeButton) {
+            var close = $('<a class="close">x</a>').appendTo(row);
+            close.click(function(e) {
+                e.preventDefault();
+                $(this).parent().remove();
+            });
+        }
+
+        // viz http://jsfiddle.net/laelitenetwork/puJ6G/
+        minsBut.click(function(e) {
+            e.preventDefault();
+            numBut = $(this).next();
+            var currentVal = parseInt(numBut.val());
+            if (!isNaN(currentVal) && currentVal > 0) {
+                numBut.val(currentVal - 1);
+            } else {
+                numBut.val(0);
+            }
+        });
+        plusBut.click(function(e){
+            e.preventDefault();
+            numBut = $(this).prev();
+            var currentVal = parseInt(numBut.val());
+            if (!isNaN(currentVal)) {
+                numBut.val(currentVal + 1);
+            } else {
+                numBut.val(0);
+            }
+        });
+    }
+
+</script>
+
+<div id="label" style="height: 20px" ></div>
+<div id="graph" style="width: 800px;height: 400px;margin-bottom: 10px"></div>
+
+<form id="input_form" style="margin-bottom: 10px">
+
+
+    <input type='button' value='show' id='showButton' />
+    <input type='button' value='add row' id='add_row' />
+    <input type='button' value='set to current' id='set_current' />
+    <input type='checkbox' id='roll_average' /><label for="roll_average">rolling average</label>
+    <select id="roll_average_value">
+        <option value="5" >5</option>
+        <option value="10">10</option>
+        <option value="15">15</option>
+        <option value="20">20</option>
+        <option value="25">25</option>
+        <option value="30">30</option>
+        <option value="35">35</option>
+        <option value="40">40</option>
+        <option value="45">45</option>
+        <option value="50">50</option>
+    </select>
+    <div id="rows" style="margin-top:5px"></div>
+</form>
+
+
+<div>
+    <h3 id="gnuplot_caption">run gnuplot (in Linux bash)</h3>
+    <p style="max-width: 550px">If you want to create the same plot on your computer, run following command in your terminal. It works only in Linux. Uses <em>gnuplot</em> for plotting and <em>wget</em> for obtaining data</p>
+    <p id="gnuplot_text"></p>
+</div>
+
+<div id="notification" class="notif_container" style="">
+
+</div>
+
+</body>
+</html>
