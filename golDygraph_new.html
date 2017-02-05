@@ -5,6 +5,7 @@
 
 <script src="http://code.jquery.com/jquery-1.10.2.js"></script>
 <script src="http://code.jquery.com/ui/1.11.0/jquery-ui.js"></script>
+<!--<script type="application/javascript" src="scripts/dygraph-combined.js"></script>-->
 <script src="http://cdnjs.cloudflare.com/ajax/libs/dygraph/2.0.0/dygraph.min.js"></script>
 
 <style>
@@ -81,20 +82,8 @@
 <script>
     "use strict";
 
-    //var diagnostics = {
-    //    1 : '1',
-    //    2 : '2',
-    //    3 : '3',
-    //    4 : '4',
-    //    5 : '5',
-    //    6 : '6',
-    //    7 : '7',
-    //    8 : '8',
-    //    9 : '9'
-    //}
-
     var diagnostics = {
-        loop_voltages     : 'Uloops',
+        loop_voltage     : 'Uloop',
         toroidal_field   : 'Btoroidal',
         plasma_current   : 'Iplasma',
         rogowski_current : 'Irogowski',
@@ -108,9 +97,22 @@
     var currShotNo = 0;
     var editor;
 
+    function LoadingMessage(text) {
+        this.elem = $('<div class="notif_element loading"><span class="type">info:</span>' + text + '</div>').appendTo($('#notification'));
+    }
+    LoadingMessage.prototype.remove = function() {
+        this.elem.fadeOut(500)
+        this.elem.remove();
+    }
+    LoadingMessage.prototype.changeToError = function(data, errorThrown, url) {
+        this.elem.html('<span class="type">error:</span>Request failed <i>' + url + '</i><br/>' + formatErrorMessage(data, errorThrown) + '</div>');
+        this.elem.switchClass('loading', 'error');
+        this.elem.click(function() {
+            this.remove();
+        });
+    }
+
     function formatErrorMessage(jqXHR, exception) {
-
-
         if (jqXHR.status === 0) {
             if (exception == 'timeout') return ('Connection timed out')
             else return ('Not connected.\nCheck network connection and domain (golem.fjfi...).');
@@ -129,101 +131,31 @@
         }
     }
 
-    function createLoadNotif(text) {
-        return $('<div class="notif_element loading"><span class="type">info:</span>' + text + '</div>').appendTo($('#notification'));
-    }
-    function createErrorNotif(text) {
-        var elem = $('<div class="notif_element error"><span class="type">error:</span>' + text + '</div>').appendTo($('#notification'));
-        elem.click(function() {
-            $(this).remove();
-        });
-        return elem;
-    }
-    function changeLoadToError(jqElem, text) {
-        jqElem.html('<span class="type">error:</span>' + text + '</div>');
-        jqElem.switchClass('loading', 'error');
-        jqElem.click(function() {
-            $(this).remove();
-        });
-    }
-
-
-    function getData(jqElem) {
-        var shotno = jqElem.data('shotno');
-        var diagn = jqElem.data('diagn');
-//        var url = 'http://golem.fjfi.cvut.cz/utils/data/' + shotno + '/' + diagn; // ostry provoz
-    var url = 'http://localhost:8080/golem?shotNo=' + shotno + '&diagn=' + diagn; // testing
-        var notif = createLoadNotif('Obtaining data  from <i>' + url + '</i>');
-        jqElem.data('notif', notif);
-        jqElem.data('done', false);
-        jqElem.data('error', false);
-        $.ajax({
-            async: true,
-            type: 'GET',
-            url: url,
+    function getData(shotNo,diagn,row) {
+        var shotno = shotNo;
+        var diagn = diagn;
+        var row = row;
+        return $.ajax({
+            row:    row,
+            shotno: shotno,
+            diagn:  diagn,
+            async:  true,
+            type:   'GET',
+//            url: 'http://ggolem.fjfi.cvut.cz/utils/data/' + shotno + '/' + diagn,
+            url: 'http://golem.fjfi.cvut.cz/utils/data/' + shotno + '/' + diagn,
             timeout: 9000,
+            beforeSend: function() {
+                this.loadingMsg = new LoadingMessage('Obtaining data  from <i>' + this.url + '</i>');
+            },
             success:  function(data, status, jqHXR) {
-                /*if (!/^(\d+(\.\d+)?\t\d+(\.\d+)?\n)/.test(data)) {
-                 jqElem.data('error', true);
-                 changeLoadToError(jqElem.data('notif'), 'Data obtained from <i>' + url + '</i><br/> is not in expected format!')
-                 return;
-                 } */
-                jqElem.data('data', data);
-                jqElem.data('notif').fadeOut(500);
-                setTimeout(function() {
-                    jqElem.data('notif').remove();
-                }, 500);
+                this.loadingMsg.remove();
+                this.obtainedData = data;
             },
             error:    function(data, status, errorThrown) {
-                jqElem.data('error', true);
-                changeLoadToError(jqElem.data('notif'), 'Request failed <i>' + url + '</i><br/>' + formatErrorMessage(data, errorThrown));
-            },
-            complete: function(data, status) {
-                jqElem.data('done', true);
-                jqElem.data('funcComplete')(jqElem);
+                this.loadingMsg.changeToError(data, errorThrown, this.url);
             }
         });
 
-    }
-
-    var completeData = function completeData(jqElem) {
-        var dataSet = jqElem.data('dataset');
-        for (var i = 0; i < dataSet.length; i++) {
-            if (!dataSet[i].data('done')) {
-                return;
-            }
-        }
-
-        var data = [];
-        var labels = [];
-        for (var i = 0; i < dataSet.length; i++) {
-            if (dataSet[i].data('error')) continue;
-            var shotno = dataSet[i].data('shotno');
-            var diagn = dataSet[i].data('diagn');
-            var label = '#' + shotno + '-' + diagn;
-            dataSet[i].data('label', label);
-            labels.push(label);
-            data.push(parseToArray(dataSet[i].data('data')));
-        }
-        if (data.length == 0) {
-            $('#showButton').removeAttr('disabled');
-            return;
-        }
-        var array = joinArrays(data);
-        graph.updateOptions({
-            file: array,
-            labels: ['time'].concat(labels)
-        });
-
-        for(var i = 0; i < dataSet.length; i++) {
-            var properties = graph.getPropertiesForSeries(dataSet[i].data('label'));
-            if (properties) {
-                dataSet[i].children('span').css('color', properties.color);
-            } else {
-                dataSet[i].children('span').css('color', '#ffffff');
-            }
-        }
-        $('#showButton').removeAttr('disabled');
     }
 
     function getCurrent() {
@@ -262,6 +194,7 @@
             xlabel: 'time [s]',
             ylabel: 'unit [a.u.]',
             labelsDiv: 'label',
+            labelsSeparateLines: true,
             drawCallback: function() {
                 $('#gnuplot_text').text(toGnuplotCommand2());
             }
@@ -275,21 +208,44 @@
         $('#showButton').click( function(e) {
             e.preventDefault();
             $(this).attr("disabled", true);
-            var rows = $('#rows').children();
             var dataSet = [];
-            for (var i = 0; i < rows.length; i++) {
-                var row = $(rows[i]);
-                dataSet.push(row);
+            var rows = $('#rows').children().each(function() {
+                var row = $(this);
                 var shotno = $('input[name=shotNo]', row).val();
                 var diagn = $('select[name=diagn]', row).val();
-                row.data('shotno', shotno);
-                row.data('diagn', diagn);
-                row.data('funcComplete', completeData);
-                row.data('dataset', dataSet);
-            }
-            for (i = 0; i < dataSet.length; i++) {
-                getData(dataSet[i]);
-            }
+                dataSet.push(getData(shotno, diagn, row));
+            });
+            $.when.apply($, dataSet).always(function () {
+                var queries = this.constructor === Array ? this : [this];
+                var arrayLength = queries.length;
+                var data = [];
+                var labels = [];
+                var rows = [];
+                for (var i = 0; i < arrayLength; i++) {
+                    if (!queries[i].obtainedData) continue;
+                    var shotno = queries[i].shotno;
+                    var diagn = queries[i].diagn;
+                    var label = '#' + shotno + '-' + diagn;
+                    labels.push(label);
+                    rows.push(queries[i].row);
+                    data.push(parseToArray(queries[i].obtainedData));
+                }
+                var array = joinArrays(data);
+                graph.updateOptions({
+                    file: array,
+                    labels: ['time'].concat(labels)
+                });
+                arrayLength = labels.length;
+                for(var i = 0; i < arrayLength; i++) {
+                    var properties = graph.getPropertiesForSeries(labels[i]);
+                    if (properties) {
+                        rows[i].children('span').css('color', properties.color);
+                    } else {
+                        rows[i].children('span').css('color', '#ffffff');
+                    }
+                }
+                $('#showButton').removeAttr('disabled');
+            })
         });
 
         $('#set_current').click( function(e) {
@@ -320,6 +276,50 @@
         });
 
     });
+
+    // funkce prida do elementu 'row' dalsi radek
+    function addInputRow(closeButton) {
+        var rows = $('#rows');
+        var row  = $('<div></div>').appendTo(rows);
+
+        $('<span>&#9632</span>').css('color', '#ffffff').css('font-size', '125%').appendTo(row);
+        var minsBut = $('<input type=\'button\' value=\'-\'/>').appendTo(row);
+        var numBut  = $('<input type=\'text\' name=\'shotNo\' value=\'' + currShotNo + '\' class=\'shotNo\'/>').appendTo(row);
+        var plusBut = $('<input type=\'button\' value=\'+\'/>').appendTo(row);
+        var select  = $('<select type=\'select\' name=\'diagn\'></select>').appendTo(row);
+        for (var key in diagnostics) {
+            $('<option value=\'' + key + '\'>' + diagnostics[key] + '</option>').appendTo(select);
+        }
+        if (closeButton) {
+            var close = $('<a class="close">x</a>').appendTo(row);
+            close.click(function(e) {
+                e.preventDefault();
+                $(this).parent().remove();
+            });
+        }
+
+        // viz http://jsfiddle.net/laelitenetwork/puJ6G/
+        minsBut.click(function(e) {
+            e.preventDefault();
+            numBut = $(this).next();
+            var currentVal = parseInt(numBut.val());
+            if (!isNaN(currentVal) && currentVal > 0) {
+                numBut.val(currentVal - 1);
+            } else {
+                numBut.val(0);
+            }
+        });
+        plusBut.click(function(e){
+            e.preventDefault();
+            numBut = $(this).prev();
+            var currentVal = parseInt(numBut.val());
+            if (!isNaN(currentVal)) {
+                numBut.val(currentVal + 1);
+            } else {
+                numBut.val(0);
+            }
+        });
+    }
 
     function toGnuplotCommand() {
         if (!graph) return;
@@ -391,56 +391,16 @@
         return ret;
     }
 
-    // funkce prida do elementu 'row' dalsi radek
-    function addInputRow(closeButton) {
-        var rows = $('#rows');
-        var row  = $('<div></div>').appendTo(rows);
 
-        $('<span>&#9632</span>').css('color', '#ffffff').css('font-size', '125%').appendTo(row);
-        var minsBut = $('<input type=\'button\' value=\'-\'/>').appendTo(row);
-        var numBut  = $('<input type=\'text\' name=\'shotNo\' value=\'' + currShotNo + '\' class=\'shotNo\'/>').appendTo(row);
-        var plusBut = $('<input type=\'button\' value=\'+\'/>').appendTo(row);
-        var select  = $('<select type=\'select\' name=\'diagn\'></select>').appendTo(row);
-        for (var key in diagnostics) {
-            $('<option value=\'' + key + '\'>' + diagnostics[key] + '</option>').appendTo(select);
-        }
-        if (closeButton) {
-            var close = $('<a class="close">x</a>').appendTo(row);
-            close.click(function(e) {
-                e.preventDefault();
-                $(this).parent().remove();
-            });
-        }
-
-        // viz http://jsfiddle.net/laelitenetwork/puJ6G/
-        minsBut.click(function(e) {
-            e.preventDefault();
-            numBut = $(this).next();
-            var currentVal = parseInt(numBut.val());
-            if (!isNaN(currentVal) && currentVal > 0) {
-                numBut.val(currentVal - 1);
-            } else {
-                numBut.val(0);
-            }
-        });
-        plusBut.click(function(e){
-            e.preventDefault();
-            numBut = $(this).prev();
-            var currentVal = parseInt(numBut.val());
-            if (!isNaN(currentVal)) {
-                numBut.val(currentVal + 1);
-            } else {
-                numBut.val(0);
-            }
-        });
-    }
 
 </script>
 
-<div id="label" style="height: 20px" ></div>
-<div id="graph" style="width: 800px;height: 400px;margin-bottom: 10px"></div>
+<div>
+<div id="graph" style="width: 800px;height: 400px;margin-bottom: 10px;float:left"></div>
+<div id="label" style="float:left"></div>
+</div>
 
-<form id="input_form" style="margin-bottom: 10px">
+<form id="input_form" style="clear:both;margin-bottom: 10px">
 
 
     <input type='button' value='show' id='showButton' />
