@@ -3,10 +3,9 @@
 <html>
 <body>
 
-<script src="http://code.jquery.com/jquery-1.10.2.js"></script>
-<script src="http://code.jquery.com/ui/1.11.0/jquery-ui.js"></script>
-<!--<script type="application/javascript" src="scripts/dygraph-combined.js"></script>-->
-<script src="http://cdnjs.cloudflare.com/ajax/libs/dygraph/2.0.0/dygraph.min.js"></script>
+<script src="//code.jquery.com/jquery-1.10.2.js"></script>
+<script src="//code.jquery.com/ui/1.11.0/jquery-ui.js"></script>
+<script src="//cdnjs.cloudflare.com/ajax/libs/dygraph/2.0.0/dygraph.min.js"></script>
 
 <style>
 
@@ -81,18 +80,21 @@
 
 <script>
     "use strict";
-
-    var diagnostics = {
-        loop_voltage     : 'Uloop',
-        toroidal_field   : 'Btoroidal',
-        plasma_current   : 'Iplasma',
-        rogowski_current : 'Irogowski',
-        photodiode       : 'Photodiode',
-        photodiode_alpha : 'PhotodHalfa',
-        hxr              : 'HXR',
-        electron_density : 'el. density'
-    }
-
+    var configuration = {
+        baseURL:"http://golem.fjfi.cvut.cz/utils/data/",
+        diagnostics:[
+            {   name:"Uloop",
+                address:"loop_voltage"},
+            {   name:"toroidal field",
+                address:"toroidal_field"},
+            {   name:"plasma current",
+                address:"plasma_current"},
+            {   name:"rogowski current",
+                address:"rogowski_current"},
+            {   name:"photodiode",
+                address:"photodiode"}
+        ]
+    };
     var graph;
     var currShotNo = 0;
     var editor;
@@ -280,15 +282,19 @@
     // funkce prida do elementu 'row' dalsi radek
     function addInputRow(closeButton) {
         var rows = $('#rows');
-        var row  = $('<div></div>').appendTo(rows);
+        var diagn_name = rows.children('div:last-of-type').children('select').val();
+        var row  = $('<div></div>');
 
         $('<span>&#9632</span>').css('color', '#ffffff').css('font-size', '125%').appendTo(row);
         var minsBut = $('<input type=\'button\' value=\'-\'/>').appendTo(row);
         var numBut  = $('<input type=\'text\' name=\'shotNo\' value=\'' + currShotNo + '\' class=\'shotNo\'/>').appendTo(row);
         var plusBut = $('<input type=\'button\' value=\'+\'/>').appendTo(row);
         var select  = $('<select type=\'select\' name=\'diagn\'></select>').appendTo(row);
-        for (var key in diagnostics) {
-            $('<option value=\'' + key + '\'>' + diagnostics[key] + '</option>').appendTo(select);
+        for (var i in configuration.diagnostics) {
+            var opt = $('<option value=\'' + configuration.diagnostics[i].address + '\' >' + configuration.diagnostics[i].name + '</option>').appendTo(select);
+            if (diagn_name && diagn_name === configuration.diagnostics[i].address) {
+                opt.attr('selected', 'selected');
+            }
         }
         if (closeButton) {
             var close = $('<a class="close">x</a>').appendTo(row);
@@ -297,6 +303,7 @@
                 $(this).parent().remove();
             });
         }
+        row.appendTo(rows);
 
         // viz http://jsfiddle.net/laelitenetwork/puJ6G/
         minsBut.click(function(e) {
