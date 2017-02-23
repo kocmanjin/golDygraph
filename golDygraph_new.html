@@ -5,6 +5,7 @@
 
 <script src="//code.jquery.com/jquery-1.10.2.js"></script>
 <script src="//code.jquery.com/ui/1.11.0/jquery-ui.js"></script>
+<script src="//cdnjs.cloudflare.com/ajax/libs/jquery-cookie/1.4.1/jquery.cookie.min.js"></script>
 <script src="//cdnjs.cloudflare.com/ajax/libs/dygraph/2.0.0/dygraph.min.js"></script>
 
 <style>
@@ -80,8 +81,9 @@
 
 <script>
     "use strict";
-    var configuration = {
-        baseURL:"http://golem.fjfi.cvut.cz/utils/data/",
+    const BASE_URL = "http://golem.fjfi.cvut.cz/utils/data/";
+    var base = {
+        set_name: "Basic",
         diagnostics:[
             {   name:"Uloop",
                 address:"loop_voltage"},
@@ -95,9 +97,25 @@
                 address:"photodiode"}
         ]
     };
+
+    var papouch_st = {
+        set_name: "Papouch ST",
+        diagnostics:[
+            {   name:"mc1",
+                address:"mirnov_1"},
+            {   name:"mc5",
+                address:"mirnov_5"},
+            {   name:"mc9",
+                address:"mirnov_9"},
+            {   name:"mc13",
+                address:"mirnov_13"}
+        ]
+    }
+
+    var diagnostic_set = [base, papouch_st];
+
     var graph;
     var currShotNo = 0;
-    var editor;
 
     function LoadingMessage(text) {
         this.elem = $('<div class="notif_element loading"><span class="type">info:</span>' + text + '</div>').appendTo($('#notification'));
@@ -113,6 +131,8 @@
             this.remove();
         });
     }
+
+
 
     function formatErrorMessage(jqXHR, exception) {
         if (jqXHR.status === 0) {
@@ -144,7 +164,7 @@
             async:  true,
             type:   'GET',
 //            url: 'http://ggolem.fjfi.cvut.cz/utils/data/' + shotno + '/' + diagn,
-            url: 'http://golem.fjfi.cvut.cz/utils/data/' + shotno + '/' + diagn,
+            url: BASE_URL + shotno + '/' + diagn,
             timeout: 9000,
             beforeSend: function() {
                 this.loadingMsg = new LoadingMessage('Obtaining data  from <i>' + this.url + '</i>');
@@ -187,9 +207,33 @@
     }
 
     $(document).ready( function() {
+        console.log($.cookie("PlotRequest"));
+        var plotRequest = JSON.parse($.cookie("PlotRequest"));
         $('#roll_average_value').hide();
         getCurrent();
-        addInputRow(false);
+        if ((plotRequest == null) || (plotRequest.length == 0)) {
+            createInputRow(currShotNo, null, false);
+        } else {
+            var close_button = false;
+            for (var i = 0; i < plotRequest.length; i++) {
+                var req = plotRequest[i];
+                createInputRow(req.shotno, req.diagn, close_button);
+                close_button = true;
+            }
+        }
+
+//        var show_diagn = $("#shown_diagn");
+//        for (var i = 0; i < diagnostics_set.length; i++) {
+//            $("<input type='checkbox' name='" + diagnostics_set[i].set_name + "'>" + diagnostics_set[i].set_name + "<br/>").appendTo(show_diagn).change(function() {
+//                var obj = $(this);
+//                if ($(this).prop('checked')) {
+//                    curre
+//                } else {
+//
+//                }
+//                console.log($(this).prop('name'));
+//            });
+//        }
 
         graph = new Dygraph(document.getElementById("graph"), "0 0\n0.04 0", {
 //        labels: ['time', '#' + currShotNo + '-' + diagn],
@@ -204,19 +248,25 @@
 
         $('#add_row').click(function(e) {
             e.preventDefault();
-            addInputRow(true);
+            var diagn_name = $('#rows').children('div:last-of-type').children('select').val();
+            createInputRow(currShotNo, diagn_name, true);
         });
 
         $('#showButton').click( function(e) {
             e.preventDefault();
+            $.cookie("test", "Hodnota cookie", {expires: 10});
             $(this).attr("disabled", true);
+
             var dataSet = [];
+            var cookieSet = [];
             var rows = $('#rows').children().each(function() {
                 var row = $(this);
                 var shotno = $('input[name=shotNo]', row).val();
                 var diagn = $('select[name=diagn]', row).val();
+                cookieSet.push({shotno: shotno, diagn: diagn});
                 dataSet.push(getData(shotno, diagn, row));
             });
+            $.cookie("PlotRequest", JSON.stringify(cookieSet), {expires: 10});
             $.when.apply($, dataSet).always(function () {
                 var queries = this.constructor === Array ? this : [this];
                 var arrayLength = queries.length;
@@ -283,17 +333,29 @@
     function addInputRow(closeButton) {
         var rows = $('#rows');
         var diagn_name = rows.children('div:last-of-type').children('select').val();
+
+        createInputRow(currShotNo, diagn_name, closeButton);
+    }
+
+    // funkce prida do elementu 'row' dalsi radek
+    function createInputRow(shot_no, diagn_name, closeButton) {
         var row  = $('<div></div>');
 
         $('<span>&#9632</span>').css('color', '#ffffff').css('font-size', '125%').appendTo(row);
         var minsBut = $('<input type=\'button\' value=\'-\'/>').appendTo(row);
-        var numBut  = $('<input type=\'text\' name=\'shotNo\' value=\'' + currShotNo + '\' class=\'shotNo\'/>').appendTo(row);
+        var numBut  = $('<input type=\'text\' name=\'shotNo\' value=\'' + shot_no + '\' class=\'shotNo\'/>').appendTo(row);
         var plusBut = $('<input type=\'button\' value=\'+\'/>').appendTo(row);
         var select  = $('<select type=\'select\' name=\'diagn\'></select>').appendTo(row);
-        for (var i in configuration.diagnostics) {
-            var opt = $('<option value=\'' + configuration.diagnostics[i].address + '\' >' + configuration.diagnostics[i].name + '</option>').appendTo(select);
-            if (diagn_name && diagn_name === configuration.diagnostics[i].address) {
-                opt.attr('selected', 'selected');
+        var diagn_set_length = diagnostic_set.length;
+        for (var i = 0; i < diagn_set_length; i++ ) {
+            var diagnostic = diagnostic_set[i];
+            var opt_group = $("<optgroup label='" + diagnostic.set_name + "'>").appendTo(select);
+            var diagn_length = diagnostic.diagnostics.length;
+            for (var j = 0; j < diagn_length; j++) {
+                var opt = $('<option value=\'' + diagnostic.diagnostics[j].address + '\' >' + diagnostic.diagnostics[j].name + '</option>').appendTo(opt_group);
+                if (diagn_name && diagn_name === diagnostic.diagnostics[j].address) {
+                    opt.attr('selected', 'selected');
+                }
             }
         }
         if (closeButton) {
@@ -436,8 +498,12 @@
     <p id="gnuplot_text"></p>
 </div>
 
-<div id="notification" class="notif_container" style="">
+<!--<div>-->
+    <!--<h3>Settings</h3>-->
+    <!--<form id="shown_diagn"></form>-->
+<!--</div>-->
 
+<div id="notification" class="notif_container">
 </div>
 
 </body>
